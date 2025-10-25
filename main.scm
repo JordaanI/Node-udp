@@ -142,7 +142,10 @@
 (define (connect-nodes s c)
   (>> (node-out-channel s) ((set-packet-destination c) (new-packet '_connect_ (list)))))
 
-(define (send-packet packet node destination-ID)
+(define (set-packet-destination node packet destination-ID)
   (packet-destination-set! packet (table-ref (node-connections node) destination-ID))
+  packet)
+
+(define (send-packet packet node destination-ID)
   (>> (node-out-channel node)
-      packet))
+      (set-packet-destination node packet destination-ID)))
