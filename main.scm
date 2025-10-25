@@ -38,6 +38,7 @@
                                                    out-transducer))))
     (node-channels-set! node (list->table `((in-channel . ,in-channel)
                                             (out-channel . ,out-channel))))
+    (pp node)
     node))
 
 (define (node-in-channel node)
@@ -51,6 +52,7 @@
   (channel-consumer (node-out-channel node)
                     (%processor (batch-send node)))
   (node-running?-set! node #t)
+  (println "Node started: " (node-ID node))
   node)
 
 (define (batch-send node)
@@ -110,26 +112,32 @@
 
            (loop (read socket))))))))
 
-(define (consume-input node #!optional (action identity))
-  (channel-consumer
-   (node-in-channel node)
-   (%processor (lambda (packet)
-                 (let ((ID (packet-ID packet))
-                       (connections (node-connections node)))
-                   (if (not (table-ref connections ID #f))
-                       (let ((ret (packet-copy packet)))
-                         (table-set! connections ID (packet-source packet))
-                         (packet-destination-set! ret (packet-source packet))
-                         (>> (node-out-channel node) ret)))
-                   (if (not (eq? '_connect_ (packet-function packet)))
-                       (action packet)))))))
+(define (consume-input node #!key registration-ext (action identity))
+  (let ((in-channel (node-in-channel node)))
+    (channel-consumer
+     in-channel
+     (%processor (lambda (packet)
+                   (let ((ID (packet-ID packet))
+                         (connections (node-connections node)))
+                     (if (not (table-ref connections ID #f))
+                         (let ((ret (packet-copy packet)))
+                           (table-set! connections ID (packet-source packet))
+                           (packet-destination-set! ret (packet-source packet))
+                           (packet-args-set! ret (list #f))
+                           (if registration-ext (packet-sub-set! ret (list registration-ext)))
+                           (if (car (packet-args packet)) (>> (node-out-channel node) ret))
+                           (for-each (lambda (datum) (>> in-channel datum)) (packet-sub packet))
+                           (display (string-append "Registered: " ID " to " (node-ID node)))
+                           (newline)))
+                     (if (not (eq? '_connect_ (packet-function packet)))
+                         (action packet))))))))
 
 (define (connect-node-to node host)
   (let ((socket (node-socket node)))
     (udp-destination-set! (table-ref host 'address) (table-ref host 'port-number) socket)
     (for-each (lambda (datum)
                 (write datum socket))
-              (pack-packet ((tag-packet node) (new-packet '_connect_ (list))) BATCH_SEND_SIZE))))
+              (pack-packet ((tag-packet node) (new-packet '_connect_ (list #t))) BATCH_SEND_SIZE))))
 
 (define (connect-nodes s c)
   (>> (node-out-channel s) ((set-packet-destination c) (new-packet '_connect_ (list)))))
