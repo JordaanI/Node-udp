@@ -24,16 +24,18 @@
                   #!key (ID (random-integer 100000))
                   (in-transducer $identity)
                   (out-transducer $identity))
-  (let ((node (make-node
-               ID
-               (open-udp (list local-address: (string-append address ":" port)))
-               (make-table)
-               (make-table)
-               #f))
-        (in-channel (create-channel transducer: ($compose
-                                                 ($filter packet?)
-                                                 in-transducer)))
-        (out-channel (create-channel transducer: out-transducer)))
+  (let* ((node (make-node
+                ID
+                (open-udp (list local-address: (string-append address ":" port)))
+                (make-table)
+                (make-table)
+                #f))
+         (in-channel (create-channel transducer: ($compose
+                                                  ($filter packet?)
+                                                  in-transducer)))
+         (out-channel (create-channel transducer: ($compose
+                                                   ($map (tag-packet node))
+                                                   out-transducer))))
     (node-channels-set! node (list->table `((in-channel . ,in-channel)
                                             (out-channel . ,out-channel))))
     node))
@@ -55,24 +57,31 @@
   (let ((batch-size BATCH_SEND_SIZE)
         (socket (node-socket node)))
     (lambda (packet)
-      (let* ((u8 (object->u8vector packet))
-             (u8l (u8vector-length u8))
-             (total (ceiling (/ u8l batch-size)))
-             (ID (string-append (number->string u8l) (number->string (random-integer 10000000))))
-             (target-socket-info (packet-destination packet)))
-        (udp-destination-set! (socket-info-address target-socket-info) (socket-info-port-number target-socket-info) socket)
-        (let loop ((index 0) (end batch-size))
-          (println "Sending index: " index)
-          (if (< index total)
-              (begin
-                (write (object->u8vector
-                        (list->table
-                         `((ID . ,ID)
-                           (index . ,index)
-                           (total . ,total)
-                           (payload . ,(subu8vector u8 (* index batch-size) (min u8l end)))))) socket)
-                (loop (+ 1 index) (+ batch-size end)))
-              (println "Finished sending: " packet)))))))
+      (let ((packets (pack-packet packet batch-size))
+            (target-socket-info (packet-destination packet)))
+        (udp-destination-set!
+         (socket-info-address target-socket-info)
+         (socket-info-port-number target-socket-info)
+         socket)
+        (for-each (lambda (datum)
+                    (write datum socket))
+                  packets)))))
+
+(define (pack-packet packet batch-size)
+  (let* ((u8 (object->u8vector packet))
+         (u8l (u8vector-length u8))
+         (total (ceiling (/ u8l batch-size)))
+         (ID (string-append (number->string u8l) (number->string (random-integer 10000000)))))
+    (let loop ((index 0) (end batch-size))
+      (if (= index total) (list)
+          (begin
+            (cons (object->u8vector
+                   (list->table
+                    `((ID . ,ID)
+                      (index . ,index)
+                      (total . ,total)
+                      (payload . ,(subu8vector u8 (* index batch-size) (min u8l end))))))
+                  (loop (+ 1 index) (+ batch-size end))))))))
 
 (define (start-reader node)
   (let ((cache (make-table init: #f))
@@ -101,5 +110,31 @@
 
            (loop (read socket))))))))
 
-(define (consume-input node #!key (action identity))
-  (channel-consumer (node-in-channel node) (%processor action)))
+(define (consume-input node #!optional (action identity))
+  (channel-consumer
+   (node-in-channel node)
+   (%processor (lambda (packet)
+                 (let ((ID (packet-ID packet))
+                       (connections (node-connections node)))
+                   (if (not (table-ref connections ID #f))
+                       (let ((ret (packet-copy packet)))
+                         (table-set! connections ID (packet-source packet))
+                         (packet-destination-set! ret (packet-source packet))
+                         (>> (node-out-channel node) ret)))
+                   (if (not (eq? '_connect_ (packet-function packet)))
+                       (action packet)))))))
+
+(define (connect-node-to node host)
+  (let ((socket (node-socket node)))
+    (udp-destination-set! (table-ref host 'address) (table-ref host 'port-number) socket)
+    (for-each (lambda (datum)
+                (write datum socket))
+              (pack-packet ((tag-packet node) (new-packet '_connect_ (list))) BATCH_SEND_SIZE))))
+
+(define (connect-nodes s c)
+  (>> (node-out-channel s) ((set-packet-destination c) (new-packet '_connect_ (list)))))
+
+(define (send-packet packet node destination-ID)
+  (packet-destination-set! packet (table-ref (node-connections node) destination-ID))
+  (>> (node-out-channel node)
+      packet))

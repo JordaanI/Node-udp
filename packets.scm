@@ -16,7 +16,7 @@
 ;; Project:
 ;;
 
-(define-type packet id: 9DB0534D-F314-45AA-A1B7-B9B64DB5FE3E ID function args sub destination)
+(define-type packet id: 9DB0534D-F314-45AA-A1B7-B9B64DB5FE3E ID function args sub source destination)
 
 (define (new-packet function args . sub)
   (make-packet
@@ -24,27 +24,19 @@
    function
    args
    sub
+   ""
    ""))
 
-(define (tag-packet ID)
+(define (tag-packet node)
   (lambda (packet)
     (if (packet? packet)
         (make-packet
-         ID
+         (node-ID node)
          (packet-function packet)
-         (map (tag-packet ID) (packet-args packet))
-         (map (tag-packet ID) (packet-sub packet)))
-        packet)))
-
-(define (set-packet-destination destination)
-  (lambda (packet)
-    (if (packet? packet)
-        (make-packet
-         (packet-ID packet)
-         (packet-function packet)
-         (map (set-packet-destination destination) (packet-args packet))
-         (map (set-packet-destination destination) (packet-sub packet))
-         destination)
+         (map (tag-packet node) (packet-args packet))
+         (map (tag-packet node) (packet-sub packet))
+         (udp-local-socket-info (node-socket node))
+         (packet-destination packet))
         packet)))
 
 (define (execute-packet functions #!key (verbose? #f))
