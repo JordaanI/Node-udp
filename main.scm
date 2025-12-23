@@ -18,22 +18,25 @@
 
 (define BATCH_SEND_SIZE 5000)
 
-(define-type node id: 26A52C1A-CFC5-4526-A10D-2ED793974E41 ID socket connections channels running?)
+(define-type node id: 26A52C1A-CFC5-4526-A10D-2ED793974E41 ID socket connections channels data)
 
 (define (new-node address port
-                  #!key (ID (random-integer 100000))
+                  #!key
+                  (ID (generate-guid))
                   (in-transducer $identity)
-                  (out-transducer $identity))
+                  (out-transducer $identity)
+                  (data (make-table)))
   (let* ((node (make-node
                 ID
                 (open-udp (list local-address: (string-append address ":" port)))
                 (make-table)
                 (make-table)
-                #f))
+                data))
          (in-channel (create-channel transducer: ($compose
                                                   ($filter packet?)
                                                   in-transducer)))
          (out-channel (create-channel transducer: ($compose
+                                                   ($filter packet?)
                                                    ($map (tag-packet node))
                                                    out-transducer))))
     (node-channels-set! node (list->table `((in-channel . ,in-channel)
@@ -51,7 +54,6 @@
   (start-reader node)
   (channel-consumer (node-out-channel node)
                     (%processor (batch-send node)))
-  (node-running?-set! node #t)
   (println "Node started: " (node-ID node))
   node)
 
