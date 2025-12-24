@@ -27,15 +27,15 @@
    ""
    ""))
 
-(define (tag-packet node)
+(define (tag-packet udp-node)
   (lambda (packet)
     (if (packet? packet)
         (make-packet
-         (node-ID node)
+         (udp-node-ID udp-node)
          (packet-function packet)
-         (map (tag-packet node) (packet-args packet))
-         (map (tag-packet node) (packet-sub packet))
-         (udp-local-socket-info (node-socket node))
+         (map (tag-packet udp-node) (packet-args packet))
+         (map (tag-packet udp-node) (packet-sub packet))
+         (udp-local-socket-info (udp-node-socket udp-node))
          (packet-destination packet))
         packet)))
 
