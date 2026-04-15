@@ -16,5 +16,9 @@
 ;; Project:
 ;;
 
+
+(include "utilities/loader.scm")
+
 (include "main.scm")
+(include "aux.scm")
 (include "packets.scm")

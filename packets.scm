@@ -39,23 +39,32 @@
          (packet-destination packet))
         packet)))
 
-(define (execute-packet functions #!key (verbose? #f))
+(define (mark-packet-internal packet)
+  (make-packet
+   '_internal_
+   (packet-function packet)
+   (packet-args packet)
+   (packet-sub packet)
+   (packet-source packet)
+   (packet-destination packet)))
+
+(define (execute-packet functions)
   (lambda (packet)
-    (if verbose?
-        (begin
-          (display "Executing: ")
-          (pp packet)))
     (if (packet? packet)
         (let ((function (table-ref functions (packet-function packet) #f)))
           (if function
               (let ((result (apply function
-                                   (map (execute-packet functions verbose?: verbose?) (packet-args packet)))))
-                (let loop ((sub (packet-sub packet)))
-                  (if (not (null? sub))
-                      (begin
-                        ((execute-packet functions verbose?: verbose?) (car sub))
-                        (loop (cdr sub)))))
-                result)
-              (begin
-                (println "Unkown Function: " (packet-function packet)))))
+                                   (list-transduce
+				    ($map (execute-packet functions))
+				    %cons
+				    (packet-args packet)))))
+                (list-transduce
+		 ($map (execute-packet functions))
+		 %ignore
+		 (packet-sub packet))
+                result)              
+              (println "Unkown Function: " (packet-function packet))))
         packet)))
+
+(define connection-packet
+  (new-packet '__!connection!__ (list)))
